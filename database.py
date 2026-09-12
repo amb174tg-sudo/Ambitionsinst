@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import select, delete, func, update
+from sqlalchemy import BigInteger, select, delete, func, update
 from config import DATABASE_URL
 
 os.makedirs("data", exist_ok=True)
@@ -31,9 +31,9 @@ class Account(Base):
 class ParsedUser(Base):
     __tablename__ = "parsed_users"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     username: Mapped[str | None] = mapped_column(nullable=True, index=True)
-    access_hash: Mapped[int] = mapped_column(default=0)
+    access_hash: Mapped[int] = mapped_column(BigInteger, default=0)
     source: Mapped[str] = mapped_column(default="")
     status: Mapped[str] = mapped_column(default="new")
     added_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
@@ -44,7 +44,7 @@ class ParsedUser(Base):
 class SentLog(Base):
     __tablename__ = "sent_log"
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     account_label: Mapped[str] = mapped_column(default="")
     result: Mapped[str] = mapped_column(default="")
     error: Mapped[str] = mapped_column(default="")
