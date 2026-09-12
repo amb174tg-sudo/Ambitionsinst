@@ -304,16 +304,3 @@ async def run_broadcast(message_text: str, account_ids: list[int], report_cb=Non
     return await asyncio.gather(*tasks, return_exceptions=True)
 
 print("=== END FILE ===", flush=True)
-
-# ============================================================
-#  ЗАПУСК БОТА
-# ============================================================
-
-if __name__ == "__main__":
-    print("=== FORCED RUN STARTED ===", flush=True)
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print(f"=== CRASHED: {e} ===", flush=True)
-        raise
-        
