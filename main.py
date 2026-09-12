@@ -1,4 +1,4 @@
-print("=== BOT FILE STARTED ===", flush=true) 
+print("=== BOT FILE STARTED ===", flush=True) 
 import asyncio
 import random
 from datetime import datetime, timedelta
@@ -303,4 +303,4 @@ async def run_broadcast(message_text: str, account_ids: list[int], report_cb=Non
     tasks = [run_account_worker(acc, message_text, report_cb) for acc in accounts]
     return await asyncio.gather(*tasks, return_exceptions=True)
 
-print("=== END FILE ===", flush=true)
+print("=== END FILE ===", flush=True)
