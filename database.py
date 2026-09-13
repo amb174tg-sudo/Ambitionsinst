@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import BigInteger, select, delete, func, update
+from sqlalchemy import select, delete, func, update, BigInteger
 from config import DATABASE_URL
 
 os.makedirs("data", exist_ok=True)
@@ -58,6 +58,12 @@ async def init_db():
 
 async def add_account(session_string: str, role: str, label: str = "", username: str = "") -> int:
     async with Session() as s:
+        existing = await s.execute(
+            select(Account).where(Account.session_string == session_string)
+        )
+        acc = existing.scalar_one_or_none()
+        if acc:
+            return acc.id
         acc = Account(session_string=session_string, role=role, label=label, username=username)
         s.add(acc)
         await s.commit()
