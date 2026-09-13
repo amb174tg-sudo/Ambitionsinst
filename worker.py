@@ -25,7 +25,7 @@ from config import (
 
 async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
     """Один аккаунт-отправитель. Резолв только по @username."""
-    stats = {"sent": 0, "failed": 0, "skipped": 0}
+    stats = {"sent": 0, "failed": 0, "skipped": 0, "cooldown": False}
     label = account_row.label or account_row.username or f"acc:{account_row.id}"
     aid = account_row.id
 
@@ -36,7 +36,7 @@ async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
         if not await client.is_user_authorized():
             await db.set_account_status(aid, "dead")
             await client.disconnect()
-            return stats
+            return label, stats
     except Exception as e:
         print(f"[{label}] connect_failed: {e}")
         await db.set_account_status(aid, "dead")
@@ -44,7 +44,7 @@ async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
             await client.disconnect()
         except Exception:
             pass
-        return stats
+        return label, stats
 
     # ── Батч под локом ────────────────────────────────────────
     async with lock:
@@ -52,7 +52,7 @@ async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
 
     if not batch:
         await client.disconnect()
-        return stats
+        return label, stats
 
     for u in batch:
         await db.mark_user(u.user_id, "taken", label)
@@ -60,7 +60,6 @@ async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
     # ── Отправка ──────────────────────────────────────────────
     try:
         for user_row in batch:
-            # нет @username — отправить некуда
             if not user_row.username:
                 await db.mark_user(user_row.user_id, "failed", label)
                 await db.log_sent(user_row.user_id, label, "skipped", "no_username")
@@ -77,18 +76,18 @@ async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
                 stats["sent"] += 1
 
             except FloodWaitError as e:
-                # Telegram сказал ждать — ставим cooldown на аккаунт
                 wait_until = datetime.utcnow() + timedelta(seconds=e.seconds)
                 await db.set_account_status(aid, "cooldown", wait_until)
                 await db.mark_user(user_row.user_id, "new", "")
+                stats["cooldown"] = True
                 print(f"[{label}] FloodWait {e.seconds}s → cooldown")
                 break
 
             except PeerFloodError:
-                # лимит на аккаунт — длинный cooldown
                 wait_until = datetime.utcnow() + timedelta(seconds=ACCOUNT_COOLDOWN)
                 await db.set_account_status(aid, "cooldown", wait_until)
                 await db.mark_user(user_row.user_id, "new", "")
+                stats["cooldown"] = True
                 print(f"[{label}] PeerFlood → cooldown {ACCOUNT_COOLDOWN}s")
                 break
 
@@ -108,7 +107,6 @@ async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
                 await db.log_sent(user_row.user_id, label, "failed", f"{type(e).__name__}: {e}")
                 stats["failed"] += 1
 
-            # пауза между отправками — рандом из твоих env
             await asyncio.sleep(random.uniform(SEND_MIN_DELAY, SEND_MAX_DELAY))
 
     finally:
@@ -117,18 +115,26 @@ async def run_account_worker(account_row, text: str, lock: asyncio.Lock):
         except Exception:
             pass
 
-    print(f"[{label}] sent={stats['sent']} failed={stats['failed']} skipped={stats['skipped']}")
-    return stats
+    return label, stats
 
 
-async def run_broadcast(text: str):
-    """Запускает воркер на всех аккаунтах-отправителях параллельно."""
-    # берём всё, у чего роль допускает отправку
-    accounts = await db.list_accounts(role="sender")
-    if not accounts:
-        accounts = await db.list_accounts()  # fallback — все
+async def run_broadcast(text: str, ids: list[int] | None = None, report_cb=None):
+    """
+    text      — текст рассылки
+    ids       — список Account.id, которыми слать (None = все подходящие)
+    report_cb — async callable(label, stats, final=False), вызывается по каждому аккаунту
+    """
+    # ── Выбор аккаунтов ───────────────────────────────────────
+    if ids:
+        accounts = []
+        for aid in ids:
+            acc = await db.get_account_by_id(aid)
+            if acc:
+                accounts.append(acc)
+    else:
+        accounts = await db.list_accounts()
 
-    # фильтр: только активные и без активного cooldown
+    # фильтр: активные и без активного cooldown
     now = datetime.utcnow()
     accounts = [
         a for a in accounts
@@ -137,15 +143,25 @@ async def run_broadcast(text: str):
     ]
 
     if not accounts:
-        print("❌ Нет доступных аккаунтов (active и не в cooldown)")
+        print("❌ Нет доступных аккаунтов")
         return
 
-    print(f"🚀 Старт: {len(accounts)} аккаунтов, батч={USERS_PER_ACCOUNT}, "
+    print(f"🚀 Старт: {len(accounts)} акк., батч={USERS_PER_ACCOUNT}, "
           f"delay={SEND_MIN_DELAY}-{SEND_MAX_DELAY}s")
 
     lock = asyncio.Lock()
+
+    async def _run_one(acc):
+        label, stats = await run_account_worker(acc, text, lock)
+        if report_cb:
+            try:
+                await report_cb(label, stats, final=True)
+            except Exception as e:
+                print(f"report_cb error: {e}")
+        return stats
+
     results = await asyncio.gather(
-        *[run_account_worker(a, text, lock) for a in accounts],
+        *[_run_one(a) for a in accounts],
         return_exceptions=True,
     )
 
