@@ -137,6 +137,32 @@ async def take_batch_for_account(limit: int):
         return res.scalars().all()
 
 
+# ================= NEW: выдать N юзеров и удалить из базы =================
+async def take_users_for_export(limit: int = 100) -> list[dict]:
+    """
+    Атомарно берёт до `limit` юзеров со статусом 'new',
+    удаляет их из базы и возвращает список dict:
+    [{"user_id": int, "username": str|None}, ...]
+    Если база пуста — вернёт [].
+    """
+    async with Session() as s:
+        res = await s.execute(
+            select(ParsedUser).where(ParsedUser.status == "new").limit(limit)
+        )
+        rows = res.scalars().all()
+        if not rows:
+            return []
+
+        result = [{"user_id": r.user_id, "username": r.username} for r in rows]
+        ids = [r.id for r in rows]
+
+        await s.execute(delete(ParsedUser).where(ParsedUser.id.in_(ids)))
+        await s.commit()
+
+    return result
+# ========================================================================
+
+
 async def count_by_status(status: str) -> int:
     async with Session() as s:
         res = await s.execute(
