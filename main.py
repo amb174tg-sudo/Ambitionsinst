@@ -39,6 +39,7 @@ MAIN_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="➕ Добавить аккаунт (рассылка)", callback_data="add_sender")],
     [InlineKeyboardButton(text="📥 Пополнить базу", callback_data="parse_menu")],
     [InlineKeyboardButton(text="📤 Начать рассылку", callback_data="bc_menu")],
+    [InlineKeyboardButton(text="🧾 Выдать 100 юзеров", callback_data="export_100")],
     [InlineKeyboardButton(text="👥 Аккаунты", callback_data="accounts")],
     [InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
 ])
@@ -92,18 +93,55 @@ async def accounts_menu(c: CallbackQuery):
     await c.answer()
 
 
+# ---------- ВЫДАТЬ 100 ЮЗЕРОВ ----------
+@router.callback_query(F.data == "export_100")
+async def export_100(c: CallbackQuery):
+    if c.from_user.id != config.OWNER_ID:
+        await c.answer()
+        return
+
+    users = await db.take_users_for_export(100)
+    if not users:
+        await c.message.answer("База пуста.")
+        await c.answer()
+        return
+
+    lines = []
+    for u in users:
+        username = u["username"] if isinstance(u, dict) else getattr(u, "username", "")
+        user_id = u["user_id"] if isinstance(u, dict) else getattr(u, "user_id", None)
+        lines.append(f"@{username}" if username else str(user_id))
+
+    chunk = ""
+    for line in lines:
+        if len(chunk) + len(line) + 1 > 3500:
+            await c.message.answer(chunk)
+            chunk = ""
+        chunk += line + "\n"
+    if chunk:
+        await c.message.answer(chunk)
+
+    await c.message.answer(
+        f"✅ Выдано и удалено из базы: {len(users)} юзеров",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu")]
+        ])
+    )
+    await c.answer()
+
+
 # ---------- ADD SESSION ----------
 @router.callback_query(F.data == "add_parser")
 async def add_parser(c: CallbackQuery, state: FSMContext):
     await state.set_state(FS.add_parser_session)
-    await c.message.edit_text("Отправь **строку сессии** для аккаунта-парсера:")
+    await c.message.edit_text("Отправь <b>строку сессии</b> для аккаунта-парсера:")
     await c.answer()
 
 
 @router.callback_query(F.data == "add_sender")
 async def add_sender(c: CallbackQuery, state: FSMContext):
     await state.set_state(FS.add_sender_session)
-    await c.message.edit_text("Отправь **строку сессии** для аккаунта-рассылки:")
+    await c.message.edit_text("Отправь <b>строку сессии</b> для аккаунта-рассылки:")
     await c.answer()
 
 
